@@ -94,13 +94,46 @@ CREATE TABLE IF NOT EXISTS compliance_task (
 CREATE TABLE IF NOT EXISTS task_set (
   id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
-  default_due_date DATE
+  circular_id INTEGER REFERENCES circular(id) ON DELETE SET NULL,
+  default_due_date DATE,
+  start_date DATE,
+  end_date DATE,
+  frequency VARCHAR(50),
+  reporting_date DATE,
+  type VARCHAR(50) DEFAULT 'REGULAR',
+  authority_id INTEGER REFERENCES authority(id) ON DELETE SET NULL,
+  reference_no VARCHAR(255),
+  assignment_time VARCHAR(20),
+  reporting_time VARCHAR(20),
+  due_time VARCHAR(20),
+  assignment_day_of_week INTEGER,
+  reporting_day_of_week INTEGER,
+  due_day_of_week INTEGER,
+  assignment_days_of_month VARCHAR(255),
+  reporting_days_of_month VARCHAR(255),
+  due_days_of_month VARCHAR(255),
+  assignment_schedule VARCHAR(255),
+  reporting_schedule VARCHAR(255),
+  due_schedule VARCHAR(255),
+  day_of_week INTEGER,
+  days_of_month TEXT,
+  schedule_day INTEGER,
+  schedule_month INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS task_set_mapping (
   task_set_id INTEGER REFERENCES task_set(id) ON DELETE CASCADE,
   task_id INTEGER REFERENCES compliance_task(id) ON DELETE CASCADE,
+  due_date DATE,
   PRIMARY KEY (task_set_id, task_id)
+);
+
+CREATE TABLE IF NOT EXISTS task_set_branch (
+  task_set_id INTEGER REFERENCES task_set(id) ON DELETE CASCADE,
+  branch_id INTEGER REFERENCES branch_dept(id) ON DELETE CASCADE,
+  PRIMARY KEY (task_set_id, branch_id)
 );
 
 CREATE TABLE IF NOT EXISTS assignment (
@@ -110,7 +143,10 @@ CREATE TABLE IF NOT EXISTS assignment (
   proposed_timeline DATE,
   status VARCHAR(50), -- 'DRAFT', 'PENDING_TIMELINE', 'TIMELINE_APPROVED', 'CO_REVIEWING_TIMELINE', 'IN_PROGRESS', 'REVIEW_PENDING', 'COMPLETED', 'REJECTED'
   review_remark TEXT,
-  reviewed_at TIMESTAMP
+  timeline_remark TEXT,
+  reviewed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS assignment_task (

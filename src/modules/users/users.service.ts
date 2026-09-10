@@ -11,7 +11,7 @@ export class UsersService {
   constructor(
     private readonly db: DatabaseService,
     private readonly idService: IdService,
-  ) {}
+  ) { }
 
   async findAll() {
     const query = `
@@ -144,7 +144,7 @@ export class UsersService {
   private async updateManagedBranches(userId: string, branchIds: number[]) {
     // 1. Unassign all branches currently assigned to this CO
     await this.db.query(`UPDATE branch_dept SET co_user_id = NULL WHERE co_user_id = $1`, [userId]);
-    
+
     // 2. Assign the new branches
     if (branchIds && branchIds.length > 0) {
       const placeholders = branchIds.map((_, i) => `$${i + 2}`).join(', ');
