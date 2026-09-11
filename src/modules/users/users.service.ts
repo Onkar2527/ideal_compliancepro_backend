@@ -20,7 +20,10 @@ export class UsersService {
         u.role, 
         u.branch_id, b.name as branch_name,
         u.is_active, u.created_at, u.updated_at,
-        (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.co_user_id = u.id) as managed_branch_ids
+        CASE 
+          WHEN u.role = 'CCO' THEN (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.cco_user_id = u.id)
+          ELSE (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.co_user_id = u.id)
+        END as managed_branch_ids
       FROM users u
       LEFT JOIN branch_dept b ON u.branch_id = b.id
       ORDER BY u.id::integer ASC
@@ -32,7 +35,10 @@ export class UsersService {
   async findOne(id: string) {
     const query = `
       SELECT u.*, b.name as branch_name,
-             (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.co_user_id = u.id) as managed_branch_ids
+        CASE 
+          WHEN u.role = 'CCO' THEN (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.cco_user_id = u.id)
+          ELSE (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.co_user_id = u.id)
+        END as managed_branch_ids
       FROM users u
       LEFT JOIN branch_dept b ON u.branch_id = b.id
       WHERE u.id = $1
@@ -43,7 +49,11 @@ export class UsersService {
 
   async findByUsername(username: string) {
     const query = `
-      SELECT u.*, b.name as branch_name
+      SELECT u.*, b.name as branch_name,
+        CASE 
+          WHEN u.role = 'CCO' THEN (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.cco_user_id = u.id)
+          ELSE (SELECT json_agg(bd.id) FROM branch_dept bd WHERE bd.co_user_id = u.id)
+        END as managed_branch_ids
       FROM users u
       LEFT JOIN branch_dept b ON u.branch_id = b.id
       WHERE u.username = $1 AND u.is_active = true
@@ -82,9 +92,11 @@ export class UsersService {
     const result = await this.db.query(query, values);
     const user = result.rows[0];
 
-    // Assign managed branches for CO
+    // Assign managed branches for CO or CCO
     if (data.role === 'CO' && data.managed_branch_ids) {
-      await this.updateManagedBranches(user.id, data.managed_branch_ids);
+      await this.updateCoManagedBranches(user.id, data.managed_branch_ids);
+    } else if (data.role === 'CCO' && data.managed_branch_ids) {
+      await this.updateCcoManagedBranches(user.id, data.managed_branch_ids);
     }
 
     return user;
@@ -129,19 +141,29 @@ export class UsersService {
     const result = await this.db.query(query, values);
     const user = result.rows[0];
 
-    // Handle managed branches for CO (even if it's changing role away from CO, we update to [])
+    // Handle managed branches for CO and CCO
+    const effectiveRole = data.role || user.role;
     if (data.managed_branch_ids !== undefined) {
-      const branchIds = data.role === 'CO' ? data.managed_branch_ids : [];
-      await this.updateManagedBranches(id, branchIds);
-    } else if (data.role && data.role !== 'CO') {
-      // If role changed from CO to something else, clear branches
-      await this.updateManagedBranches(id, []);
+      if (effectiveRole === 'CO') {
+        await this.updateCoManagedBranches(id, data.managed_branch_ids);
+        await this.updateCcoManagedBranches(id, []);
+      } else if (effectiveRole === 'CCO') {
+        await this.updateCcoManagedBranches(id, data.managed_branch_ids);
+        await this.updateCoManagedBranches(id, []);
+      } else {
+        await this.updateCoManagedBranches(id, []);
+        await this.updateCcoManagedBranches(id, []);
+      }
+    } else if (data.role && data.role !== 'CO' && data.role !== 'CCO') {
+      // If role changed from CO/CCO to something else, clear branches
+      await this.updateCoManagedBranches(id, []);
+      await this.updateCcoManagedBranches(id, []);
     }
 
     return user;
   }
 
-  private async updateManagedBranches(userId: string, branchIds: number[]) {
+  private async updateCoManagedBranches(userId: string, branchIds: number[]) {
     // 1. Unassign all branches currently assigned to this CO
     await this.db.query(`UPDATE branch_dept SET co_user_id = NULL WHERE co_user_id = $1`, [userId]);
 
@@ -155,7 +177,23 @@ export class UsersService {
     }
   }
 
+  private async updateCcoManagedBranches(userId: string, branchIds: number[]) {
+    // 1. Unassign all branches currently assigned to this CCO
+    await this.db.query(`UPDATE branch_dept SET cco_user_id = NULL WHERE cco_user_id = $1`, [userId]);
+
+    // 2. Assign the new branches
+    if (branchIds && branchIds.length > 0) {
+      const placeholders = branchIds.map((_, i) => `$${i + 2}`).join(', ');
+      await this.db.query(
+        `UPDATE branch_dept SET cco_user_id = $1 WHERE id IN (${placeholders})`,
+        [userId, ...branchIds]
+      );
+    }
+  }
+
   async remove(id: string) {
+    await this.updateCoManagedBranches(id, []);
+    await this.updateCcoManagedBranches(id, []);
     const query = `DELETE FROM users WHERE id = $1`;
     await this.db.query(query, [id]);
     return { deleted: true };

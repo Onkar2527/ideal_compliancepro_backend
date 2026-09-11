@@ -1,4 +1,4 @@
-import { IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class CreateBranchDto {
   @IsString()
@@ -6,4 +6,7 @@ export class CreateBranchDto {
 
   @IsString()
   type: string;
+
+  @IsOptional()
+  parent_id?: number | null;
 }

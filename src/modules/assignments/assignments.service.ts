@@ -89,6 +89,8 @@ export class AssignmentsService implements OnModuleInit {
         at.remarks,
         at.review_status,
         at.review_remark,
+        at.sub_dept_id,
+        sd.name as sub_dept_name,
         at.due_date::TEXT as due_date,
         at.proposed_due_date::TEXT as proposed_due_date,
         at.proposed_remark,
@@ -119,6 +121,7 @@ export class AssignmentsService implements OnModuleInit {
       JOIN task_set ts ON ts.id = a.task_set_id
       JOIN branch_dept bd ON bd.id = a.branch_id
       JOIN compliance_task ct ON ct.id = at.task_id
+      LEFT JOIN branch_dept sd ON at.sub_dept_id = sd.id
       LEFT JOIN circular c ON c.id = ct.circular_id
       LEFT JOIN authority auth ON auth.id = COALESCE(ct.authority_id, ts.authority_id, c.authority_id)
       LEFT JOIN task_header th ON ct.header_id = th.id
@@ -585,6 +588,18 @@ export class AssignmentsService implements OnModuleInit {
     }
 
     return lastResult;
+  }
+
+  
+  async delegateTaskToSubDept(assignmentTaskId: number, subDeptId: number | null) {
+    const query = `
+      UPDATE assignment_task
+      SET sub_dept_id = $1
+      WHERE id = $2
+      RETURNING *
+    `;
+    const result = await this.db.query(query, [subDeptId || null, assignmentTaskId]);
+    return result.rows[0];
   }
 
   async completeTaskDirectly(assignmentTaskId: number, assignmentId: number, complianceStatus: 'COMPLIED' | 'NOT_COMPLIED', remarks: string, username: string = 'Branch User', userRole: string = 'DEPARTMENT') {

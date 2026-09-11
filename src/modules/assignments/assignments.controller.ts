@@ -194,6 +194,16 @@ export class AssignmentsController {
     );
   }
 
+  
+  @Patch(':id/tasks/:taskId/delegate')
+  async delegateTask(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Body('sub_dept_id') subDeptId: number | null
+  ) {
+    return this.assignmentsService.delegateTaskToSubDept(parseInt(taskId, 10), subDeptId);
+  }
+
   @Patch(':id/tasks/:taskId/complete')
   async completeTaskDirectly(
     @Param('id') id: string,
