@@ -386,8 +386,9 @@ export class AssignmentsService implements OnModuleInit {
     let paramIndex = 1;
 
     if (branchId) {
-      conditions.push(`a.branch_id = $${paramIndex++}`);
+      conditions.push(`(a.branch_id = $${paramIndex} OR EXISTS (SELECT 1 FROM assignment_task at WHERE at.assignment_id = a.id AND at.sub_dept_id = $${paramIndex}))`);
       values.push(branchId);
+      paramIndex++;
     }
 
     if (status) {
@@ -436,22 +437,35 @@ export class AssignmentsService implements OnModuleInit {
     const total = parseInt(countResult.rows[0].count, 10);
 
     const query = `
+      WITH paginated_assignments AS (
+        SELECT 
+          a.id, a.task_set_id, a.branch_id, a.proposed_timeline, a.status, a.created_at
+        FROM assignment a
+        JOIN task_set ts ON ts.id = a.task_set_id
+        JOIN branch_dept bd ON bd.id = a.branch_id
+        ${whereClause}
+        ORDER BY a.id DESC
+        LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+      )
       SELECT 
-        a.id, a.proposed_timeline, a.status, a.created_at,
+        pa.id, pa.proposed_timeline, pa.status, pa.created_at,
         ts.id as task_set_id, ts.name as task_set_name, ts.type as task_set_type, ts.circular_id, ts.frequency, ts.due_time, ts.due_schedule,
         bd.name as branch_name,
-        EXISTS (
-          SELECT 1 FROM assignment_task at 
-          WHERE at.assignment_id = a.id AND at.due_date < CURRENT_DATE AND UPPER(at.status) = 'PENDING'
-        ) as is_overdue,
-        (SELECT COUNT(*) FROM assignment_task at WHERE at.assignment_id = a.id) as total_tasks,
-        (SELECT COUNT(*) FROM assignment_task at WHERE at.assignment_id = a.id AND UPPER(at.status) = 'COMPLETED') as completed_tasks
-      FROM assignment a
-      JOIN task_set ts ON ts.id = a.task_set_id
-      JOIN branch_dept bd ON bd.id = a.branch_id
-      ${whereClause}
-      ORDER BY a.id DESC
-      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+        COALESCE(stats.is_overdue, false) as is_overdue,
+        COALESCE(stats.total_tasks, 0) as total_tasks,
+        COALESCE(stats.completed_tasks, 0) as completed_tasks
+      FROM paginated_assignments pa
+      JOIN task_set ts ON ts.id = pa.task_set_id
+      JOIN branch_dept bd ON bd.id = pa.branch_id
+      LEFT JOIN LATERAL (
+        SELECT 
+          COUNT(*)::INTEGER AS total_tasks,
+          COUNT(*) FILTER (WHERE UPPER(at.status) = 'COMPLETED')::INTEGER AS completed_tasks,
+          COALESCE(BOOL_OR(at.due_date < CURRENT_DATE AND UPPER(at.status) = 'PENDING'), false) AS is_overdue
+        FROM assignment_task at 
+        WHERE at.assignment_id = pa.id
+      ) stats ON true
+      ORDER BY pa.id DESC
     `;
 
     values.push(limit, offset);
@@ -554,11 +568,11 @@ export class AssignmentsService implements OnModuleInit {
 
       // 2. Save evidence record linked to specific task
       const query = `
-        INSERT INTO evidence (assignment_task_id, assignment_id, file_url, remark)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO evidence (assignment_task_id, assignment_id, file_url, remark, uploader_name, uploader_role)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
       `;
-      const result = await this.db.query(query, [assignmentTaskId, assignmentId, url, remark]);
+      const result = await this.db.query(query, [assignmentTaskId, assignmentId, url, remark, username, userRole]);
       lastResult = result.rows[0];
     }
 
@@ -639,6 +653,8 @@ export class AssignmentsService implements OnModuleInit {
         e.file_url, 
         e.remark, 
         e.submitted_at,
+        e.uploader_name,
+        e.uploader_role,
         e.assignment_task_id,
         at.task_id, 
         ct.description

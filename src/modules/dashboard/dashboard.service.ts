@@ -57,9 +57,9 @@ export class DashboardService {
       recentAssignmentsQuery += ` WHERE bd.${col} = $1 ORDER BY a.id DESC LIMIT 8`;
       recentAssignmentsParams.push(userId);
     } else if (isDeptOrBranch && branchId) {
-      assignmentStatsQuery += ` WHERE a.branch_id = $1`;
+      assignmentStatsQuery += ` WHERE (a.branch_id = $1 OR EXISTS (SELECT 1 FROM assignment_task at WHERE at.assignment_id = a.id AND at.sub_dept_id = $1))`;
       assignmentParams.push(branchId);
-      recentAssignmentsQuery += ` WHERE a.branch_id = $1 ORDER BY a.id DESC LIMIT 8`;
+      recentAssignmentsQuery += ` WHERE (a.branch_id = $1 OR EXISTS (SELECT 1 FROM assignment_task at WHERE at.assignment_id = a.id AND at.sub_dept_id = $1)) ORDER BY a.id DESC LIMIT 8`;
       recentAssignmentsParams.push(branchId);
     } else {
       recentAssignmentsQuery += ` ORDER BY a.id DESC LIMIT 8`;
@@ -87,7 +87,7 @@ export class DashboardService {
           count(at.id) FILTER (WHERE UPPER(at.review_status) = 'APPROVED' OR UPPER(at.status) = 'COMPLETED') as approved_tasks
         FROM assignment_task at 
         JOIN assignment a ON at.assignment_id = a.id 
-        WHERE a.branch_id = $1
+        WHERE (a.branch_id = $1 OR at.sub_dept_id = $1)
       `;
       taskParams = [branchId];
     } else {
