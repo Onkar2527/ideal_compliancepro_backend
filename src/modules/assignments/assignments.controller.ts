@@ -44,14 +44,15 @@ export class AssignmentsController {
     @Query('status') status?: string,
     @Query('only_expired') onlyExpired?: string,
     @Query('task_set_type') taskSetType?: string,
-    @Query('frequency') frequency?: string
+    @Query('frequency') frequency?: string,
+    @Query('task_set_id') taskSetId?: string
   ) {
     const user = (req as any).user;
     let finalBranchId = branchId ? parseInt(branchId, 10) : undefined;
     
     if (user?.role === 'BRANCH' || user?.role === 'BRANCH_USER' || user?.role === 'DEPARTMENT') {
       const bId = user.branchId || user.branch_id;
-      if (bId) {
+      if (bId && !finalBranchId) {
         finalBranchId = parseInt(bId, 10);
       }
     }
@@ -64,7 +65,8 @@ export class AssignmentsController {
       status,
       onlyExpired: onlyExpired === 'true',
       taskSetType,
-      frequency
+      frequency,
+      taskSetId: taskSetId ? parseInt(taskSetId, 10) : undefined
     });
   }
 

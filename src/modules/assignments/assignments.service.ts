@@ -377,8 +377,8 @@ export class AssignmentsService implements OnModuleInit {
     }));
   }
 
-  async findAllPaginated(params: { page: number; limit: number; branchId?: number; search?: string; status?: string; onlyExpired?: boolean; taskSetType?: string; frequency?: string }) {
-    const { page, limit, branchId, search, status, onlyExpired, taskSetType, frequency } = params;
+  async findAllPaginated(params: { page: number; limit: number; branchId?: number; search?: string; status?: string; onlyExpired?: boolean; taskSetType?: string; frequency?: string; taskSetId?: number }) {
+    const { page, limit, branchId, search, status, onlyExpired, taskSetType, frequency, taskSetId } = params;
     const offset = (page - 1) * limit;
 
     let conditions = ['1=1'];
@@ -386,7 +386,7 @@ export class AssignmentsService implements OnModuleInit {
     let paramIndex = 1;
 
     if (branchId) {
-      conditions.push(`(a.branch_id = $${paramIndex} OR EXISTS (SELECT 1 FROM assignment_task at WHERE at.assignment_id = a.id AND at.sub_dept_id = $${paramIndex}))`);
+      conditions.push(`(a.branch_id = $${paramIndex} OR a.branch_id IN (SELECT id FROM branch_dept WHERE parent_id = $${paramIndex}) OR EXISTS (SELECT 1 FROM assignment_task at WHERE at.assignment_id = a.id AND (at.sub_dept_id = $${paramIndex} OR at.sub_dept_id IN (SELECT id FROM branch_dept WHERE parent_id = $${paramIndex}))))`);
       values.push(branchId);
       paramIndex++;
     }
@@ -412,6 +412,11 @@ export class AssignmentsService implements OnModuleInit {
       conditions.push(`(ts.name ILIKE $${paramIndex} OR bd.name ILIKE $${paramIndex} OR a.status ILIKE $${paramIndex})`);
       values.push(`%${search}%`);
       paramIndex++;
+    }
+
+    if (taskSetId) {
+      conditions.push(`a.task_set_id = $${paramIndex++}`);
+      values.push(taskSetId);
     }
 
     if (taskSetType) {
