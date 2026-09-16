@@ -1,13 +1,38 @@
 import { IsString, IsOptional, IsArray, IsNumber, IsDateString } from 'class-validator';
 
 export class CreateTaskSetDto {
+  @IsOptional()
   created_by?: number | string;
+
+  @IsOptional()
   created_by_id?: number | string;
+
+  @IsOptional()
+  @IsString()
   created_by_role?: string;
+
+  @IsOptional()
+  @IsString()
   creator_role?: string;
+
+  @IsOptional()
+  @IsString()
   created_by_name?: string;
+
+  @IsOptional()
+  @IsString()
   creator_name?: string;
+
+  @IsOptional()
+  @IsString()
   created_by_username?: string;
+
+  @IsOptional()
+  user_id?: number | string;
+
+  @IsOptional()
+  created_by_user_id?: number | string;
+
   @IsString()
   name: string;
 

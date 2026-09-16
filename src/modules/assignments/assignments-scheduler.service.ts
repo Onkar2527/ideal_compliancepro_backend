@@ -109,7 +109,7 @@ export class AssignmentsSchedulerService {
       );
 
       const isInternal = (ts.type || '').toUpperCase() === 'INTERNAL';
-      const initialStatus = isInternal ? 'In_Progress' : 'Pending_Timeline';
+      const initialStatus = 'In_Progress';
       const freq = ts.frequency ? String(ts.frequency).trim() : '6';
 
       for (const branchId of branchIds) {

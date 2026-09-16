@@ -35,7 +35,7 @@ export class AssignmentsService implements OnModuleInit {
   async create(taskSetId: number, branchIds: number[], proposedTimeline: string) {
     const tsRes = await this.db.query('SELECT type FROM task_set WHERE id = $1', [taskSetId]);
     const isInternal = (tsRes.rows[0]?.type || '').toUpperCase() === 'INTERNAL';
-    const initialStatus = isInternal ? 'In_Progress' : 'Pending_Timeline';
+    const initialStatus = 'In_Progress';
 
     const assignments = [];
     for (const branchId of branchIds) {
@@ -441,20 +441,11 @@ export class AssignmentsService implements OnModuleInit {
 
     const whereClause = 'WHERE ' + conditions.join(' AND ');
 
-    const countQuery = `
-      SELECT COUNT(*)
-      FROM assignment a
-      JOIN task_set ts ON ts.id = a.task_set_id
-      JOIN branch_dept bd ON bd.id = a.branch_id
-      ${whereClause}
-    `;
-    const countResult = await this.db.query(countQuery, values);
-    const total = parseInt(countResult.rows[0].count, 10);
-
     const query = `
       WITH paginated_assignments AS (
         SELECT 
-          a.id, a.task_set_id, a.branch_id, a.proposed_timeline, a.status, a.created_at
+          a.id, a.task_set_id, a.branch_id, a.proposed_timeline, a.status, a.created_at,
+          COUNT(*) OVER() AS full_count
         FROM assignment a
         JOIN task_set ts ON ts.id = a.task_set_id
         JOIN branch_dept bd ON bd.id = a.branch_id
@@ -463,7 +454,7 @@ export class AssignmentsService implements OnModuleInit {
         LIMIT $${paramIndex++} OFFSET $${paramIndex++}
       )
       SELECT 
-        pa.id, pa.proposed_timeline, pa.status, pa.created_at,
+        pa.id, pa.proposed_timeline, pa.status, pa.created_at, pa.full_count,
         ts.id as task_set_id, ts.name as task_set_name, ts.type as task_set_type, ts.circular_id, ts.frequency, ts.due_time, ts.due_schedule,
         bd.name as branch_name,
         COALESCE(stats.is_overdue, false) as is_overdue,
@@ -483,14 +474,32 @@ export class AssignmentsService implements OnModuleInit {
       ORDER BY pa.id DESC
     `;
 
-    values.push(limit, offset);
-    const result = await this.db.query(query, values);
+    const queryValues = [...values, limit, offset];
+    const result = await this.db.query(query, queryValues);
+
+    let total = 0;
+    if (result.rows.length > 0) {
+      total = parseInt(result.rows[0].full_count, 10);
+    } else if (offset > 0) {
+      const countQuery = `
+        SELECT COUNT(*)
+        FROM assignment a
+        JOIN task_set ts ON ts.id = a.task_set_id
+        JOIN branch_dept bd ON bd.id = a.branch_id
+        ${whereClause}
+      `;
+      const countResult = await this.db.query(countQuery, values);
+      total = parseInt(countResult.rows[0].count, 10);
+    }
 
     return {
-      data: result.rows.map((row: any) => ({
-        ...row,
-        status: (row.is_overdue && row.status?.toUpperCase() !== 'COMPLETED') ? 'Overdue' : row.status
-      })),
+      data: result.rows.map((row: any) => {
+        const { full_count, ...dataRow } = row;
+        return {
+          ...dataRow,
+          status: (dataRow.is_overdue && dataRow.status?.toUpperCase() !== 'COMPLETED') ? 'Overdue' : dataRow.status
+        };
+      }),
       total,
       page,
       limit

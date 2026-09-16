@@ -14,7 +14,8 @@ export class TaskSetsService {
 
   async create(createTaskSetDto: CreateTaskSetDto) {
     const createdByRaw = createTaskSetDto.created_by || (createTaskSetDto as any).created_by_id || (createTaskSetDto as any).user_id || null;
-    const createdBy = createdByRaw && !isNaN(Number(createdByRaw)) ? Number(createdByRaw) : null;
+    const createdBy = createdByRaw !== null && createdByRaw !== undefined ? String(createdByRaw) : null;
+    const createdById = createdByRaw && !isNaN(Number(createdByRaw)) ? Number(createdByRaw) : null;
     const createdByRole = createTaskSetDto.created_by_role || (createTaskSetDto as any).creator_role || null;
     const createdByName = createTaskSetDto.created_by_name || (createTaskSetDto as any).creator_name || (createTaskSetDto as any).created_by_username || null;
 
@@ -26,9 +27,9 @@ export class TaskSetsService {
         assignment_day_of_week, reporting_day_of_week, due_day_of_week,
         assignment_days_of_month, reporting_days_of_month, due_days_of_month,
         assignment_schedule, reporting_schedule, due_schedule,
-        created_by, created_by_role, created_by_name
+        created_by, created_by_role, created_by_name, created_by_id
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
       RETURNING *
     `;
     const result = await this.db.query(query, [
@@ -57,6 +58,7 @@ export class TaskSetsService {
       createdBy,
       createdByRole,
       createdByName,
+      createdById,
     ]);
 
     const taskSet = result.rows[0];
