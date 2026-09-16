@@ -66,6 +66,10 @@ export class AssignmentsService implements OnModuleInit {
       SELECT 
         a.id, a.proposed_timeline, a.status, a.created_at,
         ts.id as task_set_id, ts.name as task_set_name, ts.default_due_date, ts.type as task_set_type, ts.circular_id,
+        ts.created_by,
+        COALESCE(ts.created_by_role, u.role) as created_by_role,
+        COALESCE(ts.created_by_name, u.full_name, u.username) as created_by_name,
+        COALESCE(ts.created_by_name, u.full_name, u.username) as created_by_username,
         (
           SELECT json_agg(json_build_object('id', ct.id, 'description', ct.description))
           FROM task_set_mapping tsm
@@ -74,6 +78,7 @@ export class AssignmentsService implements OnModuleInit {
         ) as tasks
       FROM assignment a
       JOIN task_set ts ON ts.id = a.task_set_id
+      LEFT JOIN users u ON u.id::TEXT = ts.created_by::TEXT
       WHERE a.branch_id = $1
       ORDER BY a.id DESC
     `;
@@ -109,6 +114,10 @@ export class AssignmentsService implements OnModuleInit {
         ts.frequency,
         ts.start_date,
         ts.end_date,
+        ts.created_by,
+        COALESCE(ts.created_by_role, u.role) as created_by_role,
+        COALESCE(ts.created_by_name, u.full_name, u.username) as created_by_name,
+        COALESCE(ts.created_by_name, u.full_name, u.username) as created_by_username,
         bd.name as branch_name,
         c.reference_no as circular_reference_no,
         c.title as circular_title,
@@ -121,6 +130,7 @@ export class AssignmentsService implements OnModuleInit {
       JOIN task_set ts ON ts.id = a.task_set_id
       JOIN branch_dept bd ON bd.id = a.branch_id
       JOIN compliance_task ct ON ct.id = at.task_id
+      LEFT JOIN users u ON u.id::TEXT = ts.created_by::TEXT
       LEFT JOIN branch_dept sd ON at.sub_dept_id = sd.id
       LEFT JOIN circular c ON c.id = ct.circular_id
       LEFT JOIN authority auth ON auth.id = COALESCE(ct.authority_id, ts.authority_id, c.authority_id)
@@ -190,7 +200,7 @@ export class AssignmentsService implements OnModuleInit {
 
   async reviewTaskTimeline(assignmentId: number, assignmentTaskId: number, status: 'APPROVED' | 'REJECTED', remark?: string) {
     const reviewStatus = status === 'APPROVED' ? 'APPROVED' : 'REJECTED';
-    
+
     // If approved, update due_date to proposed_due_date
     if (status === 'APPROVED') {
       const taskQuery = `
@@ -609,7 +619,7 @@ export class AssignmentsService implements OnModuleInit {
     return lastResult;
   }
 
-  
+
   async delegateTaskToSubDept(assignmentTaskId: number, subDeptId: number | null) {
     const query = `
       UPDATE assignment_task

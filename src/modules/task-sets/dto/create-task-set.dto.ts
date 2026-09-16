@@ -1,6 +1,13 @@
 import { IsString, IsOptional, IsArray, IsNumber, IsDateString } from 'class-validator';
 
 export class CreateTaskSetDto {
+  created_by?: number | string;
+  created_by_id?: number | string;
+  created_by_role?: string;
+  creator_role?: string;
+  created_by_name?: string;
+  creator_name?: string;
+  created_by_username?: string;
   @IsString()
   name: string;
 

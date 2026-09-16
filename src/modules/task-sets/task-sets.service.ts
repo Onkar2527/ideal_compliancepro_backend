@@ -13,6 +13,11 @@ export class TaskSetsService {
   ) { }
 
   async create(createTaskSetDto: CreateTaskSetDto) {
+    const createdByRaw = createTaskSetDto.created_by || (createTaskSetDto as any).created_by_id || (createTaskSetDto as any).user_id || null;
+    const createdBy = createdByRaw && !isNaN(Number(createdByRaw)) ? Number(createdByRaw) : null;
+    const createdByRole = createTaskSetDto.created_by_role || (createTaskSetDto as any).creator_role || null;
+    const createdByName = createTaskSetDto.created_by_name || (createTaskSetDto as any).creator_name || (createTaskSetDto as any).created_by_username || null;
+
     const query = `
       INSERT INTO task_set (
         name, circular_id, default_due_date, start_date, end_date, frequency,
@@ -20,9 +25,10 @@ export class TaskSetsService {
         reference_no, assignment_time, reporting_time, due_time,
         assignment_day_of_week, reporting_day_of_week, due_day_of_week,
         assignment_days_of_month, reporting_days_of_month, due_days_of_month,
-        assignment_schedule, reporting_schedule, due_schedule
+        assignment_schedule, reporting_schedule, due_schedule,
+        created_by, created_by_role, created_by_name
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
       RETURNING *
     `;
     const result = await this.db.query(query, [
@@ -48,6 +54,9 @@ export class TaskSetsService {
       createTaskSetDto.assignment_schedule || null,
       createTaskSetDto.reporting_schedule || null,
       createTaskSetDto.due_schedule || null,
+      createdBy,
+      createdByRole,
+      createdByName,
     ]);
 
     const taskSet = result.rows[0];
@@ -66,6 +75,8 @@ export class TaskSetsService {
         c.title AS circular_title,
         c.reference_no AS circular_reference_no,
         a.name AS authority_name,
+        COALESCE(ts.created_by_name, u.full_name, u.username) AS created_by_username,
+        COALESCE(ts.created_by_role, u.role) AS created_by_role,
         COALESCE(
           (
             SELECT string_agg(b.name, ', ' ORDER BY b.name)
@@ -78,6 +89,7 @@ export class TaskSetsService {
       FROM task_set ts
       LEFT JOIN circular c ON c.id = ts.circular_id
       LEFT JOIN authority a ON a.id = ts.authority_id
+      LEFT JOIN users u ON u.id::TEXT = ts.created_by::TEXT
       ORDER BY ts.id DESC
     `);
     return result.rows;
@@ -85,9 +97,12 @@ export class TaskSetsService {
 
   async findOne(id: number) {
     const result = await this.db.query(`
-      SELECT ts.*, a.name AS authority_name 
+      SELECT ts.*, a.name AS authority_name,
+        COALESCE(ts.created_by_name, u.full_name, u.username) AS created_by_username,
+        COALESCE(ts.created_by_role, u.role) AS created_by_role
       FROM task_set ts
       LEFT JOIN authority a ON a.id = ts.authority_id
+      LEFT JOIN users u ON u.id::TEXT = ts.created_by::TEXT
       WHERE ts.id = $1
     `, [id]);
     const taskSet = result.rows[0];
@@ -111,6 +126,11 @@ export class TaskSetsService {
   }
 
   async update(id: number, updateTaskSetDto: UpdateTaskSetDto) {
+    const createdByRaw = (updateTaskSetDto as any).created_by || (updateTaskSetDto as any).created_by_id || null;
+    const createdBy = createdByRaw && !isNaN(Number(createdByRaw)) ? Number(createdByRaw) : null;
+    const createdByRole = (updateTaskSetDto as any).created_by_role || (updateTaskSetDto as any).creator_role || null;
+    const createdByName = (updateTaskSetDto as any).created_by_name || (updateTaskSetDto as any).creator_name || (updateTaskSetDto as any).created_by_username || null;
+
     const query = `
       UPDATE task_set
       SET name                     = COALESCE($1, name),
@@ -134,8 +154,11 @@ export class TaskSetsService {
           due_days_of_month        = $19,
           assignment_schedule      = $20,
           reporting_schedule       = $21,
-          due_schedule             = $22
-      WHERE id = $23
+          due_schedule             = $22,
+          created_by               = COALESCE($23, created_by),
+          created_by_role          = COALESCE($24, created_by_role),
+          created_by_name          = COALESCE($25, created_by_name)
+      WHERE id = $26
       RETURNING *
     `;
     const result = await this.db.query(query, [
@@ -161,6 +184,9 @@ export class TaskSetsService {
       updateTaskSetDto.assignment_schedule || null,
       updateTaskSetDto.reporting_schedule || null,
       updateTaskSetDto.due_schedule || null,
+      createdBy,
+      createdByRole,
+      createdByName,
       id
     ]);
     return result.rows[0];
@@ -202,7 +228,7 @@ export class TaskSetsService {
     if (branchIds && branchIds.length > 0) {
       const mappingValues = branchIds.map(branchId => `(${id}, ${branchId})`).join(',');
       await this.db.query(`INSERT INTO task_set_branch (task_set_id, branch_id) VALUES ${mappingValues}`);
-      
+
       // Immediately generate assignments for the newly mapped units
       try {
         await this.assignmentsScheduler.generateAssignmentsForActiveTaskSets(id);
