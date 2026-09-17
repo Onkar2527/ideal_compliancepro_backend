@@ -13,7 +13,7 @@ export class TasksController {
   ) {}
 
   @Post('upload')
-  async uploadTaskFile(@Req() req: any) {
+  async uploadTaskFile(@Req() req: any, @Query('folder') folder?: string) {
     const fastifyReq = req as any;
     if (typeof fastifyReq.isMultipart === 'function' && !fastifyReq.isMultipart()) {
       throw new BadRequestException('Request is not multipart');
@@ -35,7 +35,12 @@ export class TasksController {
       throw new BadRequestException('No file uploaded');
     }
 
-    const fileUrl = await this.storageService.uploadTaskFile(fileBuffer, filename);
+    let fileUrl: string;
+    if (folder === 'compliance_documents' || folder === 'documents') {
+      fileUrl = await this.storageService.uploadDocumentFile(fileBuffer, filename);
+    } else {
+      fileUrl = await this.storageService.uploadTaskFile(fileBuffer, filename, folder || 'tasks-upload');
+    }
     return { file_url: fileUrl, filename };
   }
 

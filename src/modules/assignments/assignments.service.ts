@@ -588,7 +588,7 @@ export class AssignmentsService implements OnModuleInit {
     let lastResult = null;
     for (const file of filesData) {
       // 1. Upload file to MinIO
-      const url = await this.storage.uploadFile(file.buffer, file.filename, 'application/pdf');
+      const url = await this.storage.uploadEvidenceFile(file.buffer, file.filename, 'application/pdf');
 
       // 2. Save evidence record linked to specific task
       const query = `
@@ -628,6 +628,21 @@ export class AssignmentsService implements OnModuleInit {
     return lastResult;
   }
 
+
+  async deleteTaskEvidence(assignmentId: number, taskId: number, evidenceId: number) {
+    const evRes = await this.db.query(
+      `SELECT * FROM evidence WHERE id = $1 AND (assignment_task_id = $2 OR assignment_id = $3)`,
+      [evidenceId, taskId, assignmentId]
+    );
+    const ev = evRes.rows[0];
+    if (ev) {
+      if (ev.file_url) {
+        await this.storage.deleteFile(ev.file_url);
+      }
+      await this.db.query(`DELETE FROM evidence WHERE id = $1`, [evidenceId]);
+    }
+    return { success: true, message: 'Evidence deleted successfully' };
+  }
 
   async delegateTaskToSubDept(assignmentTaskId: number, subDeptId: number | null) {
     const query = `

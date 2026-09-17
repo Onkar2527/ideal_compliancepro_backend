@@ -1,5 +1,5 @@
 // AssignmentsController — handles all /assignments/* routes
-import { Controller, Get, Post, Put, Patch, Param, Body, Req, Query, BadRequestException, Header } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Req, Query, BadRequestException, Header } from '@nestjs/common';
 import { AssignmentsService } from './assignments.service';
 import { AssignmentsSchedulerService } from './assignments-scheduler.service';
 import type { FastifyRequest } from 'fastify';
@@ -197,6 +197,19 @@ export class AssignmentsController {
   }
 
   
+  @Delete(':id/tasks/:taskId/evidence/:evidenceId')
+  async deleteTaskEvidence(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Param('evidenceId') evidenceId: string
+  ) {
+    return this.assignmentsService.deleteTaskEvidence(
+      parseInt(id, 10),
+      parseInt(taskId, 10),
+      parseInt(evidenceId, 10)
+    );
+  }
+
   @Patch(':id/tasks/:taskId/delegate')
   async delegateTask(
     @Param('id') id: string,
