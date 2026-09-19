@@ -489,13 +489,42 @@ export class TaskSetsService {
           headerId = await this.resolveTaskHeader(row['task_header']);
         }
 
+        const taskName = String(row['task_name'] || '').trim();
+        const taskNameLower = taskName.toLowerCase();
+
+        // Skip blank rows, totals, subtotals, scoring charts, and header artifacts
+        if (
+          !taskName ||
+          taskNameLower.startsWith('total') ||
+          taskNameLower.startsWith('subtotal') ||
+          taskNameLower.startsWith('grand total') ||
+          [
+            'scoring chart & grade',
+            'categories',
+            'info sec processes & controls',
+            'governance & policy',
+            'vendor management',
+            'cyber crisis management',
+            'grading',
+            'particular',
+            'particulars',
+            'sr. no.',
+            'sr no',
+            'description',
+            'parameter',
+            'parameters'
+          ].includes(taskNameLower)
+        ) {
+          continue;
+        }
+
         // Create the compliance task
         const taskRes = await this.db.query(`
           INSERT INTO compliance_task (description, header_id, authority_id, is_approved, status, priority)
           VALUES ($1, $2, $3, true, 'APPROVED', $4)
           RETURNING id
         `, [
-          String(row['task_name'] || '').trim(),
+          taskName,
           headerId,
           rowAuthId,
           String(row['priority'] || 'MEDIUM').toUpperCase(),

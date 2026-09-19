@@ -6,7 +6,10 @@ export class TaskHeadersService {
   constructor(private readonly db: DatabaseService) {}
 
   async findAll() {
-    const query = `SELECT * FROM task_header ORDER BY id ASC`;
+    const query = `
+      SELECT * FROM task_header 
+      ORDER BY COALESCE(parent_id, id) ASC, (parent_id IS NOT NULL) ASC, id ASC
+    `;
     const result = await this.db.query(query);
     return result.rows;
   }

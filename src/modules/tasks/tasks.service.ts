@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import * as xlsx from 'xlsx';
 import { DatabaseService } from '../../core/database/database.service';
 
 @Injectable()
@@ -195,5 +196,240 @@ export class TasksService {
       results.push(res);
     }
     return results;
+  }
+
+  /**
+   * Process Bulk Upload from XLSX / XLS / CSV file buffer
+   */
+  async processBulkUpload(buffer: Buffer, defaultCircularId?: number) {
+    let workbook: xlsx.WorkBook;
+    try {
+      workbook = xlsx.read(buffer, { type: 'buffer' });
+    } catch (err: any) {
+      throw new BadRequestException('Failed to parse Excel/CSV file: ' + (err.message || 'Invalid format'));
+    }
+
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      throw new BadRequestException('The uploaded workbook contains no sheets.');
+    }
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const rawRows: any[] = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+
+    if (!rawRows || rawRows.length === 0) {
+      throw new BadRequestException('The uploaded sheet contains no data rows.');
+    }
+
+    // Helper function to normalize keys
+    const normalizeKey = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    return this.db.transaction(async (client) => {
+      // Fetch existing headers
+      const headersRes = await client.query('SELECT id, name, parent_id FROM task_header');
+      const headersList = headersRes.rows;
+
+      // Find or create headers helper
+      const headerCache: { [key: string]: number } = {};
+      headersList.forEach(h => {
+        headerCache[h.name.trim().toLowerCase()] = h.id;
+      });
+
+      const findRootHeaderId = (name?: string) => {
+        if (!name) return headersList.find(h => !h.parent_id)?.id || null;
+        const root = headersList.find(h => !h.parent_id && h.name.trim().toLowerCase() === name.trim().toLowerCase());
+        return root ? root.id : (headersList.find(h => !h.parent_id)?.id || null);
+      };
+
+      const insertedTasks: any[] = [];
+      const errors: string[] = [];
+
+      for (let i = 0; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        const rowNum = i + 2; // considering 1-based index + header row
+
+        // Map columns dynamically
+        let description = '';
+        let headerName = '';
+        let mainHeaderName = '';
+        let priority = 'Medium';
+        let riskCategory = '';
+        let businessRisk = '';
+        let controlRisk = '';
+        let circularId: number | null = defaultCircularId || null;
+        let authorityId: number | null = null;
+
+        for (const [k, v] of Object.entries(row)) {
+          const normK = normalizeKey(k);
+          const valStr = String(v || '').trim();
+
+          if (normK.includes('description') || normK.includes('particular') || normK === 'task' || normK === 'taskname') {
+            description = valStr;
+          } else if (normK.includes('subheader') || normK === 'header' || normK === 'headername' || normK === 'category') {
+            headerName = valStr;
+          } else if (normK.includes('mainheader') || normK === 'domain' || normK === 'module') {
+            mainHeaderName = valStr;
+          } else if (normK.includes('priority')) {
+            priority = valStr || 'Medium';
+          } else if (normK.includes('riskcategory') || normK === 'risk') {
+            riskCategory = valStr;
+          } else if (normK.includes('businessrisk') || normK.includes('rowcode') || normK.includes('remarks') || normK === 'notes') {
+            businessRisk = valStr;
+          } else if (normK.includes('controlrisk')) {
+            controlRisk = valStr;
+          } else if (normK.includes('circularid') || normK === 'circular') {
+            if (valStr && !isNaN(Number(valStr))) circularId = Number(valStr);
+          } else if (normK.includes('authorityid') || normK === 'authority') {
+            if (valStr && !isNaN(Number(valStr))) authorityId = Number(valStr);
+          }
+        }
+
+        const descLower = description.toLowerCase();
+        if (
+          !description ||
+          descLower.startsWith('total') ||
+          descLower.startsWith('subtotal') ||
+          descLower.startsWith('grand total') ||
+          [
+            'scoring chart & grade',
+            'categories',
+            'info sec processes & controls',
+            'governance & policy',
+            'vendor management',
+            'cyber crisis management',
+            'grading',
+            'particular',
+            'particulars',
+            'sr. no.',
+            'sr no',
+            'description',
+            'parameter',
+            'parameters'
+          ].includes(descLower)
+        ) {
+          continue;
+        }
+
+        // Determine header_id
+        let headerId: number | null = null;
+        if (headerName) {
+          const cacheKey = headerName.toLowerCase();
+          if (headerCache[cacheKey]) {
+            headerId = headerCache[cacheKey];
+          } else {
+            // Auto-create sub-header under main header
+            const rootParentId = findRootHeaderId(mainHeaderName);
+            const createHeaderRes = await client.query(`
+              INSERT INTO task_header (name, parent_id)
+              VALUES ($1, $2)
+              RETURNING id, name
+            `, [headerName, rootParentId]);
+            headerId = createHeaderRes.rows[0].id;
+            headerCache[cacheKey] = headerId;
+          }
+        }
+
+        try {
+          const insertRes = await client.query(`
+            INSERT INTO compliance_task (
+              description, header_id, is_approved, status, is_discarded,
+              priority, risk_category, business_risk, control_risk,
+              circular_id, authority_id
+            ) VALUES ($1, $2, true, 'APPROVED', false, $3, $4, $5, $6, $7, $8)
+            RETURNING *
+          `, [
+            description,
+            headerId,
+            priority,
+            riskCategory || (mainHeaderName || null),
+            businessRisk || null,
+            controlRisk || null,
+            circularId,
+            authorityId || 1
+          ]);
+
+          insertedTasks.push(insertRes.rows[0]);
+        } catch (dbErr: any) {
+          errors.push(`Row ${rowNum}: ${dbErr.message || 'Database error occurred'}`);
+        }
+      }
+
+      return {
+        totalRows: rawRows.length,
+        successCount: insertedTasks.length,
+        errorCount: errors.length,
+        errors,
+        data: insertedTasks
+      };
+    });
+  }
+
+  /**
+   * Generate an Excel Template (.xlsx) for bulk uploading tasks
+   */
+  generateBulkUploadTemplate(): Buffer {
+    const wb = xlsx.utils.book_new();
+
+    const headers = [
+      'Task Description*',
+      'Main Header',
+      'Sub Header',
+      'Priority',
+      'Risk Category',
+      'Business Risk',
+      'Control Risk',
+      'Circular ID'
+    ];
+
+    const sampleRows = [
+      [
+        'Whether all IT Assets (both hardware and software) have been inventoried?',
+        'IT Governance & Cybersecurity',
+        'IT Asset Management',
+        'High',
+        'Cyber Security',
+        'Asset inventory tracking compliance',
+        'Low',
+        ''
+      ],
+      [
+        'Whether Firewall is configured in Boundary defence?',
+        'IT Legal & Regulatory Compliance',
+        'Level II - Network Management and Security',
+        'High',
+        'Network Security',
+        'Boundary security protection',
+        'Medium',
+        ''
+      ],
+      [
+        'Whether the Bank is providing Unified Payment Interface (UPI) Services?',
+        'IT Operations & Security',
+        'Level of Exposure',
+        'Medium',
+        'Payment Systems',
+        'Digital banking channel compliance',
+        'Low',
+        ''
+      ]
+    ];
+
+    const sheetData = [headers, ...sampleRows];
+    const ws = xlsx.utils.aoa_to_sheet(sheetData);
+
+    // Set column widths
+    ws['!cols'] = [
+      { wch: 60 }, // Task Description
+      { wch: 30 }, // Main Header
+      { wch: 35 }, // Sub Header
+      { wch: 15 }, // Priority
+      { wch: 20 }, // Risk Category
+      { wch: 35 }, // Business Risk
+      { wch: 15 }, // Control Risk
+      { wch: 15 }  // Circular ID
+    ];
+
+    xlsx.utils.book_append_sheet(wb, ws, 'Tasks Template');
+    return xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
   }
 }

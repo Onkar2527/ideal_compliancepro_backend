@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Patch, Put, Param, Body, ParseIntPipe, Query, Req, BadRequestException } from '@nestjs/common';
-import { FastifyRequest } from 'fastify';
+import { Controller, Get, Post, Patch, Put, Param, Body, ParseIntPipe, Query, Req, Res, BadRequestException } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { TasksService } from './tasks.service';
 import { AiService } from '../../core/ai/ai.service';
 import { StorageService } from '../../core/storage/storage.service';
@@ -11,6 +11,45 @@ export class TasksController {
     private readonly aiService: AiService,
     private readonly storageService: StorageService,
   ) {}
+
+  /**
+   * Download Task Bulk Upload Template Excel File
+   */
+  @Get('bulk-template')
+  async downloadTemplate(@Res() res: FastifyReply) {
+    const buffer = this.tasksService.generateBulkUploadTemplate();
+    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.header('Content-Disposition', 'attachment; filename="tasks_bulk_upload_template.xlsx"');
+    return res.send(buffer);
+  }
+
+  /**
+   * Bulk Upload Tasks via Excel / CSV file
+   */
+  @Post('bulk-upload')
+  async bulkUploadTasks(
+    @Req() req: FastifyRequest,
+    @Query('circular_id') circularId?: string
+  ) {
+    const fastifyReq = req as any;
+    if (typeof fastifyReq.isMultipart !== 'function' || !fastifyReq.isMultipart()) {
+      throw new BadRequestException('Request must be multipart/form-data');
+    }
+
+    const part = await fastifyReq.file();
+    if (!part) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of part.file) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    const parsedCircularId = circularId ? parseInt(circularId, 10) : undefined;
+    return this.tasksService.processBulkUpload(buffer, parsedCircularId);
+  }
 
   @Post('upload')
   async uploadTaskFile(@Req() req: any, @Query('folder') folder?: string) {

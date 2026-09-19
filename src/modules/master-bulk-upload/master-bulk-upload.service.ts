@@ -29,27 +29,26 @@ export class MasterBulkUploadService {
         const rowNumber = i + 1;
 
         try {
-          const description = String(row?.description || '').trim();
-          const circularId = Number(row?.circular_id || 0);
+          const description = String(row?.description || row?.task || '').trim();
+          const circularId = row?.circular_id && !isNaN(Number(row.circular_id)) ? Number(row.circular_id) : null;
 
           if (!description) {
             errors.push(`Row ${rowNumber}: Task description is required`);
             continue;
           }
-          if (!circularId) {
-            errors.push(`Row ${rowNumber}: Circular selection is required`);
-            continue;
-          }
 
           const headerId = row?.header_id ? Number(row.header_id) : null;
-          const priority = row?.priority ? String(row.priority).trim() : null;
+          const priority = row?.priority ? String(row.priority).trim() : 'Medium';
+          const riskCategory = row?.risk_category ? String(row.risk_category).trim() : null;
+          const businessRisk = row?.business_risk ? String(row.business_risk).trim() : null;
+          const controlRisk = row?.control_risk ? String(row.control_risk).trim() : null;
 
           const query = `
             INSERT INTO compliance_task (
               description, circular_id, header_id, is_approved, status,
-              priority
+              priority, risk_category, business_risk, control_risk, authority_id
             ) 
-            VALUES ($1, $2, $3, false, 'PENDING', $4) 
+            VALUES ($1, $2, $3, true, 'APPROVED', $4, $5, $6, $7, 1) 
             RETURNING *
           `;
 
@@ -57,7 +56,10 @@ export class MasterBulkUploadService {
             description,
             circularId,
             headerId,
-            priority
+            priority,
+            riskCategory,
+            businessRisk,
+            controlRisk
           ]);
 
           data.push(result.rows[0]);
