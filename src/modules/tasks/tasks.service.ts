@@ -6,8 +6,18 @@ import { DatabaseService } from '../../core/database/database.service';
 export class TasksService {
   constructor(private readonly db: DatabaseService) {}
 
-  async findAllPaginated(params: { page: number; limit: number; status?: string; circularId?: number; search?: string }) {
-    const { page, limit, status, circularId, search } = params;
+  async findAllPaginated(params: {
+    page: number;
+    limit: number;
+    status?: string;
+    circularId?: number;
+    search?: string;
+    isInternal?: boolean;
+    headerId?: number;
+    headerIds?: number[];
+    type?: string;
+  }) {
+    const { page, limit, status, circularId, search, isInternal, headerId, headerIds, type } = params;
     const offset = (page - 1) * limit;
 
     let conditions = ['ct.is_discarded = FALSE'];
@@ -15,20 +25,32 @@ export class TasksService {
     let paramIndex = 1;
 
     if (status === 'Pending') {
-      conditions.push(`ct.is_approved = FALSE`);
+      conditions.push('ct.is_approved = FALSE');
     } else if (status === 'Approved') {
-      conditions.push(`ct.is_approved = TRUE`);
+      conditions.push('ct.is_approved = TRUE');
     }
 
     if (circularId) {
-      conditions.push(`ct.circular_id = $${paramIndex++}`);
+      conditions.push('ct.circular_id = $' + (paramIndex++));
       values.push(circularId);
+    } else if (isInternal === true || type === 'INTERNAL') {
+      conditions.push('ct.circular_id IS NULL');
+    } else if (isInternal === false || type === 'REGULAR') {
+      conditions.push('ct.circular_id IS NOT NULL');
+    }
+
+    if (headerId) {
+      conditions.push('ct.header_id = $' + (paramIndex++));
+      values.push(headerId);
+    } else if (headerIds && headerIds.length > 0) {
+      conditions.push('ct.header_id = ANY($' + (paramIndex++) + '::int[])');
+      values.push(headerIds);
     }
 
     if (search) {
-      conditions.push(`(ct.description ILIKE $${paramIndex} OR c.title ILIKE $${paramIndex} OR a.name ILIKE $${paramIndex})`);
-      values.push(`%${search}%`);
-      paramIndex++;
+      const idx = paramIndex++;
+      conditions.push('(ct.description ILIKE $' + idx + ' OR c.title ILIKE $' + idx + ' OR a.name ILIKE $' + idx + ')');
+      values.push('%' + search + '%');
     }
 
     const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
@@ -43,6 +65,8 @@ export class TasksService {
     const countResult = await this.db.query(countQuery, values);
     const total = parseInt(countResult.rows[0].count, 10);
 
+    const p1 = paramIndex++;
+    const p2 = paramIndex++;
     const query = `
       SELECT ct.*, c.title as circular_title, a.name as authority_name, th.name as header_name
       FROM compliance_task ct
@@ -51,7 +75,7 @@ export class TasksService {
       LEFT JOIN task_header th ON ct.header_id = th.id
       ${whereClause}
       ORDER BY ct.id DESC
-      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+      LIMIT $${p1} OFFSET $${p2}
     `;
     
     values.push(limit, offset);

@@ -95,13 +95,26 @@ export class TasksController {
     @Query('status') status?: string,
     @Query('circular_id') circularId?: string,
     @Query('search') search?: string,
+    @Query('is_internal') isInternal?: string,
+    @Query('header_id') headerId?: string,
+    @Query('header_ids') headerIds?: string,
+    @Query('type') type?: string,
   ) {
+    let parsedHeaderIds: number[] | undefined;
+    if (headerIds) {
+      parsedHeaderIds = headerIds.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
+    }
+
     return this.tasksService.findAllPaginated({
       page: parseInt(page, 10),
       limit: parseInt(limit, 10),
       status,
       circularId: circularId ? parseInt(circularId, 10) : undefined,
       search,
+      isInternal: isInternal !== undefined ? isInternal === 'true' : undefined,
+      headerId: headerId ? parseInt(headerId, 10) : undefined,
+      headerIds: parsedHeaderIds,
+      type,
     });
   }
 
