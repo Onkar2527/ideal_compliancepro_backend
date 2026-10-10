@@ -13,14 +13,16 @@ export class EmailService {
 
   private initTransporter() {
     const host = this.configService.get<string>('SMTP_HOST');
-    const port = this.configService.get<number>('SMTP_PORT');
+    const port = Number(this.configService.get<number>('SMTP_PORT') || 587);
     const user = this.configService.get<string>('SMTP_USER');
     const pass = this.configService.get<string>('SMTP_PASS');
+
+    this.logger.log(`[EmailService] Initializing SMTP Transporter for host: "${host}", port: ${port}, user: "${user}"`);
 
     this.transporter = nodemailer.createTransport({
       host,
       port,
-      secure: port === 465, // true for 465, false for other ports
+      secure: port === 465, // true for 465, false for other ports (e.g. 587 uses STARTTLS)
       auth: {
         user,
         pass,
@@ -34,19 +36,14 @@ export class EmailService {
     text: string,
     html?: string,
   ): Promise<boolean> {
-    const isEnabled = this.configService.get<string>('EMAIL_NOTIFICATIONS_ENABLED') === 'true';
-    if (!isEnabled) {
-      this.logger.log(`[EmailService] Email notifications are disabled in .env. Skipping email to ${to}`);
+    const isExplicitlyDisabled = this.configService.get<string>('EMAIL_NOTIFICATIONS_ENABLED') === 'false';
+    if (isExplicitlyDisabled) {
+      this.logger.warn(`[EmailService] Email notifications explicitly disabled in .env. Skipping email to ${to}`);
       return true;
     }
-    const fromEmail = this.configService.get<string>(
-      'SMTP_FROM_EMAIL',
-      'lukman@kredpool.com',
-    );
-    const fromName = this.configService.get<string>(
-      'SMTP_FROM_NAME',
-      'AuditPro Security',
-    );
+
+    const fromEmail = this.configService.get<string>('SMTP_FROM_EMAIL');
+    const fromName = this.configService.get<string>('SMTP_FROM_NAME') || 'Compliance Pro Security';
 
     const mailOptions = {
       from: `"${fromName}" <${fromEmail}>`,
@@ -58,7 +55,7 @@ export class EmailService {
 
     try {
       this.logger.log(
-        `[EmailService] Contacting SMTP host to send email to "${to}"...`,
+        `[EmailService] Sending email to "${to}" via ${this.configService.get<string>('SMTP_HOST')} (Subject: "${subject}")...`,
       );
       const info = await this.transporter.sendMail(mailOptions);
       this.logger.log(

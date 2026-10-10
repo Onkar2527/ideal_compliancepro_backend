@@ -32,9 +32,10 @@ export class AssignmentsService implements OnModuleInit {
     }
   }
 
-  async create(taskSetId: number, branchIds: number[], proposedTimeline: string) {
-    const tsRes = await this.db.query('SELECT type FROM task_set WHERE id = $1', [taskSetId]);
+    async create(taskSetId: number, branchIds: number[], proposedTimeline: string) {
+    const tsRes = await this.db.query('SELECT name, type FROM task_set WHERE id = $1', [taskSetId]);
     const isInternal = (tsRes.rows[0]?.type || '').toUpperCase() === 'INTERNAL';
+    const taskSetName = tsRes.rows[0]?.name || 'Compliance Task Set';
     const initialStatus = 'In_Progress';
 
     const assignments = [];
@@ -57,6 +58,19 @@ export class AssignmentsService implements OnModuleInit {
         WHERE tsm.task_set_id = $2
       `;
       await this.db.query(tasksQuery, [assignment.id, taskSetId, proposedTimeline]);
+
+      // Emit assignment created / started event for notifications and emails
+      try {
+        this.eventEmitter.emit('assignment.updated', {
+          assignmentId: assignment.id,
+          status: 'NEW_ASSIGNMENT',
+          branchId: branchId,
+          taskSetName: taskSetName,
+          dueDate: proposedTimeline,
+        });
+      } catch (e: any) {
+        this.logger.error('Failed to emit NEW_ASSIGNMENT event: ' + e.message);
+      }
     }
     return assignments;
   }
@@ -644,7 +658,7 @@ export class AssignmentsService implements OnModuleInit {
     return { success: true, message: 'Evidence deleted successfully' };
   }
 
-  async delegateTaskToSubDept(assignmentTaskId: number, subDeptId: number | null) {
+    async delegateTaskToSubDept(assignmentTaskId: number, subDeptId: number | null) {
     const query = `
       UPDATE assignment_task
       SET sub_dept_id = $1
@@ -652,7 +666,38 @@ export class AssignmentsService implements OnModuleInit {
       RETURNING *
     `;
     const result = await this.db.query(query, [subDeptId || null, assignmentTaskId]);
-    return result.rows[0];
+    const updatedTask = result.rows[0];
+
+    // Emit event so notification & emails to CO, CCO, and Head are sent (not sub dept)
+    try {
+      if (subDeptId) {
+        const metaRes = await this.db.query(`
+          SELECT a.id as assignment_id, a.branch_id, ts.name as task_set_name, ct.description as task_desc, sd.name as sub_dept_name
+          FROM assignment_task at
+          JOIN assignment a ON a.id = at.assignment_id
+          JOIN task_set ts ON ts.id = a.task_set_id
+          JOIN compliance_task ct ON ct.id = at.task_id
+          LEFT JOIN branch_dept sd ON sd.id = at.sub_dept_id
+          WHERE at.id = $1
+        `, [assignmentTaskId]);
+        const meta = metaRes.rows[0];
+        if (meta) {
+          this.eventEmitter.emit('task.delegated', {
+            assignmentId: meta.assignment_id,
+            assignmentTaskId: assignmentTaskId,
+            branchId: meta.branch_id,
+            subDeptId: subDeptId,
+            subDeptName: meta.sub_dept_name,
+            taskSetName: meta.task_set_name,
+            taskDescription: meta.task_desc,
+          });
+        }
+      }
+    } catch (e: any) {
+      this.logger.error('Failed to emit task.delegated event: ' + e.message);
+    }
+
+    return updatedTask;
   }
 
   async completeTaskDirectly(assignmentTaskId: number, assignmentId: number, complianceStatus: 'COMPLIED' | 'NOT_COMPLIED', remarks: string, username: string = 'Branch User', userRole: string = 'DEPARTMENT') {
