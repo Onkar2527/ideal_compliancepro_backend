@@ -56,7 +56,7 @@ export class UsersService {
         END as managed_branch_ids
       FROM users u
       LEFT JOIN branch_dept b ON u.branch_id = b.id
-      WHERE u.username = $1 AND u.is_active = true
+      WHERE LOWER(u.username) = LOWER($1) AND u.is_active = true
     `;
     const result = await this.db.query(query, [username]);
     return result.rows[0];
