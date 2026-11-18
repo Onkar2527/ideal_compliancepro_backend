@@ -24,14 +24,16 @@ export class NotificationsService {
     if (role === 'ADMIN') {
       query = `
         SELECT * FROM notification
+        WHERE (created_by IS NULL OR created_by != $1)
         ORDER BY created_at DESC
         LIMIT 50
       `;
-      args = [];
+      args = [userId];
     } else if (['CO', 'CCO'].includes(role)) {
       query = `
         SELECT * FROM notification
-        WHERE branch_id IS NULL OR user_id = $1
+        WHERE (branch_id IS NULL OR user_id = $1)
+          AND (created_by IS NULL OR created_by != $1)
         ORDER BY created_at DESC
         LIMIT 50
       `;
@@ -39,15 +41,75 @@ export class NotificationsService {
     } else {
       query = `
         SELECT * FROM notification
-        WHERE branch_id = $1
+        WHERE (branch_id = $1 OR branch_id IS NULL OR user_id = $2)
+          AND (created_by IS NULL OR created_by != $2)
         ORDER BY created_at DESC
         LIMIT 50
       `;
-      args = [branchId];
+      args = [branchId, userId];
     }
 
-    const result = await this.db.query(query, args);
+    const result = await this.db.query(query, args).catch(async () => {
+      // Fallback in case created_by column does not exist yet
+      if (role === 'ADMIN') {
+        return this.db.query(`SELECT * FROM notification ORDER BY created_at DESC LIMIT 50`, []);
+      } else if (['CO', 'CCO'].includes(role)) {
+        return this.db.query(`SELECT * FROM notification WHERE branch_id IS NULL OR user_id = $1 ORDER BY created_at DESC LIMIT 50`, [userId]);
+      } else {
+        return this.db.query(`SELECT * FROM notification WHERE branch_id = $1 OR branch_id IS NULL OR user_id = $2 ORDER BY created_at DESC LIMIT 50`, [branchId, userId]);
+      }
+    });
     return result.rows;
+  }
+
+  async createCustomNotification(data: {
+    branchId?: number | null;
+    userId?: string | null;
+    title: string;
+    message: string;
+    createdBy?: string | null;
+  }) {
+    let targetUserId: string | null = null;
+    if (data.userId) {
+      try {
+        const uRes = await this.db.query('SELECT id FROM users WHERE id = $1', [String(data.userId)]);
+        if (uRes.rows.length > 0) {
+          targetUserId = uRes.rows[0].id;
+        }
+      } catch (err) {
+        this.logger.warn(`Could not verify user_id: ${data.userId}`);
+      }
+    }
+
+    let targetBranchId: number | null = null;
+    if (data.branchId) {
+      try {
+        const bRes = await this.db.query('SELECT id FROM branch_dept WHERE id = $1', [Number(data.branchId)]);
+        if (bRes.rows.length > 0) {
+          targetBranchId = bRes.rows[0].id;
+        }
+      } catch (err) {
+        this.logger.warn(`Could not verify branch_id: ${data.branchId}`);
+      }
+    }
+
+    // Ensure created_by column exists
+    await this.db.query(`ALTER TABLE notification ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);`).catch(() => {});
+
+    const query = `
+      INSERT INTO notification (branch_id, user_id, title, message, created_by)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+    const result = await this.db.query(query, [
+      targetBranchId,
+      targetUserId,
+      data.title,
+      data.message,
+      data.createdBy ? String(data.createdBy) : null
+    ]);
+
+    return result.rows[0];
   }
 
   async markAsRead(id: number) {
@@ -78,9 +140,9 @@ export class NotificationsService {
       query = `
         UPDATE notification 
         SET is_read = true 
-        WHERE branch_id = $1 AND is_read = false
+        WHERE (branch_id = $1 OR branch_id IS NULL OR user_id = $2) AND is_read = false
       `;
-      args = [branchId];
+      args = [branchId, userId];
     }
 
     await this.db.query(query, args);

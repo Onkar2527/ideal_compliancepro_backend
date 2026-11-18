@@ -12,7 +12,7 @@ export class ScraperService implements OnModuleInit {
   constructor(
     private readonly db: DatabaseService,
     private readonly circularsService: CircularsService,
-  ) {}
+  ) { }
 
   async onModuleInit() {
     const scraperFlag = String(process.env.ENABLE_SCRAPER).trim().toLowerCase();
@@ -55,11 +55,13 @@ export class ScraperService implements OnModuleInit {
 
   private async fetchHistoricalCirculars() {
     this.logger.log('Starting historical scraping using Puppeteer...');
+    const puppeteerModule = await import('puppeteer');
+    const puppeteer = puppeteerModule.default || puppeteerModule;
     const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     try {
       const page = await browser.newPage();
       await page.goto('https://www.rbi.org.in/Scripts/BS_CircularIndexDisplay.aspx', { waitUntil: 'networkidle2' });
-      
+
       const years = await page.evaluate(() => {
         const yearsList: string[] = [];
         const anchors = document.querySelectorAll('h2.year a');
@@ -70,10 +72,10 @@ export class ScraperService implements OnModuleInit {
         }
         return yearsList;
       });
-      
+
       this.logger.log(`Found active years to scrape: ${years.join(', ')}`);
       years.sort((a, b) => parseInt(a) - parseInt(b));
-      
+
       const state = await this.db.findOne('SELECT * FROM scraper_state WHERE authority_name = $1', ['RBI']);
       const lastProcessedDate = state?.last_processed_date ? new Date(state.last_processed_date) : null;
       let startYear = 0;
@@ -81,36 +83,36 @@ export class ScraperService implements OnModuleInit {
         startYear = lastProcessedDate.getFullYear();
         this.logger.log(`Found last_processed_date: ${lastProcessedDate.toISOString()}. Resuming from year ${startYear}.`);
       }
-      
+
       const yearsToScrape = years.filter(y => parseInt(y) >= startYear);
-      
+
       for (const year of yearsToScrape) {
         this.logger.log(`Scraping year: ${year}...`);
-        
+
         await page.evaluate((y) => {
-           // First click the year to open the accordion
-           const yearBtn = document.getElementById(`btn${y}`);
-           if (yearBtn) yearBtn.click();
+          // First click the year to open the accordion
+          const yearBtn = document.getElementById(`btn${y}`);
+          if (yearBtn) yearBtn.click();
         }, year);
-        
+
         await new Promise(r => setTimeout(r, 1000));
 
         await page.evaluate((y) => {
-           // Then click 'All Months'
-           const btn = document.getElementById(`${y}0`);
-           if (btn) btn.click();
+          // Then click 'All Months'
+          const btn = document.getElementById(`${y}0`);
+          if (btn) btn.click();
         }, year);
-        
+
         try {
-           // Wait until the table updates (we can check if the first circular year is the requested year)
-           await new Promise(r => setTimeout(r, 8000)); // wait longer for AJAX
-        } catch(e) {
-           this.logger.warn(`Wait for nav timeout for year ${year}, proceeding anyway`);
+          // Wait until the table updates (we can check if the first circular year is the requested year)
+          await new Promise(r => setTimeout(r, 8000)); // wait longer for AJAX
+        } catch (e) {
+          this.logger.warn(`Wait for nav timeout for year ${year}, proceeding anyway`);
         }
-        
+
         const html = await page.content();
         await this.parseAndInsertCirculars(html);
-        
+
         await new Promise(r => setTimeout(r, 5000));
       }
     } finally {
@@ -121,7 +123,7 @@ export class ScraperService implements OnModuleInit {
   private async parseAndInsertCirculars(html: string, limit?: number) {
     const state = await this.db.findOne('SELECT * FROM scraper_state WHERE authority_name = $1', ['RBI']);
     const lastProcessedDate = state?.last_processed_date ? new Date(state.last_processed_date) : null;
-    
+
     const $ = cheerio.load(html);
     const circulars: { date: string; title: string; reference_no?: string | null; link: string; isWithdrawn?: boolean }[] = [];
 
@@ -133,7 +135,7 @@ export class ScraperService implements OnModuleInit {
         const link = linkElement.attr('href') || '';
         const rawRefNo = $(tds[0]).text().replace(/\s+/g, ' ').trim();
         const dateText = $(tds[1]).text().trim();
-        
+
         // Subject is in column 3 (index 3) on RBI table; fallback to column 2 if table has 3 columns
         let subject = '';
         if (tds.length >= 4) {
@@ -148,22 +150,22 @@ export class ScraperService implements OnModuleInit {
 
         const rowHtml = $(element).html() || '';
         const isWithdrawn = (rowHtml.toLowerCase().includes('withdrawn') && (rowHtml.toLowerCase().includes('red') || rowHtml.toLowerCase().includes('#ff0000'))) || title.toLowerCase().includes('[withdrawn]');
-        
+
         if (dateText && title && link) {
-           circulars.push({ 
-             date: dateText, 
-             title, 
-             reference_no: referenceNo,
-             link: link.startsWith('http') ? link : `https://www.rbi.org.in/Scripts/${link}`,
-             isWithdrawn
-           });
+          circulars.push({
+            date: dateText,
+            title,
+            reference_no: referenceNo,
+            link: link.startsWith('http') ? link : `https://www.rbi.org.in/Scripts/${link}`,
+            isWithdrawn
+          });
         }
       }
     });
 
     let circularsToProcess = circulars.reverse();
     if (limit) {
-       circularsToProcess = circularsToProcess.slice(0, limit);
+      circularsToProcess = circularsToProcess.slice(0, limit);
     }
 
     let newestDate: Date | null = null;
@@ -175,7 +177,7 @@ export class ScraperService implements OnModuleInit {
       // Match DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY
       const dmyRegex = /^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})$/;
       const match = dateStr.match(dmyRegex);
-      
+
       if (match) {
         const d = match[1].padStart(2, '0');
         const m = match[2].padStart(2, '0');
@@ -191,19 +193,19 @@ export class ScraperService implements OnModuleInit {
           circularDate = new Date(`${y}-${m}-${d}T00:00:00Z`);
         }
       }
-      
+
       if (isNaN(circularDate.getTime())) {
         this.logger.warn(`Could not parse date for circular: ${circular.title}`);
         continue;
       }
-      
+
       // if (lastProcessedDate && circularDate <= lastProcessedDate) {
       //   continue; 
       // }
-      
+
       const exists = await this.db.findOne('SELECT id FROM circular WHERE title = $1', [circular.title]);
       if (exists) {
-        continue; 
+        continue;
       }
 
       this.logger.log(`Found new circular: ${circular.title}`);
@@ -215,33 +217,33 @@ export class ScraperService implements OnModuleInit {
 
       let pdfBuffer = null;
       let pdfName = 'circular.pdf';
-      
+
       try {
         const detailPage = await axios.get(circular.link);
         const $detail = cheerio.load(detailPage.data);
         const pdfLink = $detail('a').filter((i, el) => $(el).attr('href')?.toLowerCase().endsWith('.pdf')).attr('href');
-        
+
         if (pdfLink) {
-           const actualPdfLink = pdfLink.startsWith('http') ? pdfLink : `https://www.rbi.org.in/Scripts/${pdfLink}`;
-           const pdfResponse = await axios.get(actualPdfLink, { responseType: 'arraybuffer' });
-           pdfBuffer = Buffer.from(pdfResponse.data);
-           const urlParts = actualPdfLink.split('/');
-           pdfName = urlParts[urlParts.length - 1];
+          const actualPdfLink = pdfLink.startsWith('http') ? pdfLink : `https://www.rbi.org.in/Scripts/${pdfLink}`;
+          const pdfResponse = await axios.get(actualPdfLink, { responseType: 'arraybuffer' });
+          pdfBuffer = Buffer.from(pdfResponse.data);
+          const urlParts = actualPdfLink.split('/');
+          pdfName = urlParts[urlParts.length - 1];
         }
       } catch (e: any) {
-         this.logger.warn(`Failed to fetch PDF for ${circular.title}: ${e.message}`);
+        this.logger.warn(`Failed to fetch PDF for ${circular.title}: ${e.message}`);
       }
 
       try {
         if (pdfBuffer) {
           await this.circularsService.createWithFiles({
-              authority_id: authority.id,
-              reference_no: circular.reference_no,
-              title: circular.title,
-              published_date: circularDate.toISOString().split('T')[0],
-              description: 'Automated scrape from RBI website',
-              portal_website: circular.link,
-              is_withdrawn: circular.isWithdrawn,
+            authority_id: authority.id,
+            reference_no: circular.reference_no,
+            title: circular.title,
+            published_date: circularDate.toISOString().split('T')[0],
+            description: 'Automated scrape from RBI website',
+            portal_website: circular.link,
+            is_withdrawn: circular.isWithdrawn,
           }, [
             {
               buffer: pdfBuffer,
@@ -251,28 +253,28 @@ export class ScraperService implements OnModuleInit {
           ]).catch(e => this.logger.error(`Failed to insert circular ${circular.title} with PDF: ${e.message}`));
         } else {
           await this.circularsService.create({
-              authority_id: authority.id,
-              reference_no: circular.reference_no,
-              title: circular.title,
-              published_date: circularDate.toISOString().split('T')[0],
-              description: 'Automated scrape from RBI website (No PDF found)',
-              portal_website: circular.link,
-              is_withdrawn: circular.isWithdrawn,
+            authority_id: authority.id,
+            reference_no: circular.reference_no,
+            title: circular.title,
+            published_date: circularDate.toISOString().split('T')[0],
+            description: 'Automated scrape from RBI website (No PDF found)',
+            portal_website: circular.link,
+            is_withdrawn: circular.isWithdrawn,
           }).catch(e => this.logger.error(`Failed to insert circular ${circular.title}: ${e.message}`));
         }
         this.logger.log(`Successfully processed circular: ${circular.title}`);
-      } catch(e: any) {
-         this.logger.error(`Failed to insert circular ${circular.title} into DB`, e.stack);
-         continue; 
+      } catch (e: any) {
+        this.logger.error(`Failed to insert circular ${circular.title} into DB`, e.stack);
+        continue;
       }
 
       if (!newestDate || circularDate > newestDate) {
-         newestDate = circularDate;
+        newestDate = circularDate;
       }
     }
 
     if (newestDate && (!lastProcessedDate || newestDate > lastProcessedDate)) {
-       await this.db.query(`
+      await this.db.query(`
          INSERT INTO scraper_state (authority_name, last_processed_date) 
          VALUES ('RBI', $1) 
          ON CONFLICT (authority_name) 

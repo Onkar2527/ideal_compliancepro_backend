@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Param, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Param, Req, Body } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 
 @Controller('notifications')
@@ -19,6 +19,19 @@ export class NotificationsController {
     return this.notificationsService.getNotificationsForUser(userId, role, branchId);
   }
 
+  @Post()
+  async createNotification(@Body() body: any, @Req() req: any) {
+    const user = req.user;
+    const userId: string = user?.sub || user?.id || '';
+    return this.notificationsService.createCustomNotification({
+      branchId: body.branch_id !== undefined ? body.branch_id : (body.branchId !== undefined ? body.branchId : null),
+      userId: body.user_id || body.userId || null,
+      title: body.title || 'New Notification',
+      message: body.message || '',
+      createdBy: userId
+    });
+  }
+
   @Put(':id/read')
   async markAsRead(@Param('id') id: string) {
     return this.notificationsService.markAsRead(parseInt(id, 10));
@@ -35,4 +48,5 @@ export class NotificationsController {
     return this.notificationsService.markAllAsReadForUser(userId, role, branchId);
   }
 }
+
 
